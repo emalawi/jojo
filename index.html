@@ -1,1 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jojo AI Website Builder</title>
+<style>
+    body {
+        font-family: -apple-system, Roboto, Arial, sans-serif;
+        background: #f4f4f5;
+        margin: 0;
+        padding: 16px;
+    }
+    h1 { font-size: 20px; color: #222; }
+    #status { font-size: 13px; margin-bottom: 12px; color: #888; }
+    #status.online { color: #16a34a; }
+    #status.offline { color: #dc2626; }
+    #question {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        font-size: 15px;
+        min-height: 70px;
+        resize: vertical;
+    }
+    button {
+        margin-top: 10px;
+        padding: 12px 20px;
+        background: #4f46e5;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 15px;
+        cursor: pointer;
+    }
+    button:disabled { background: #a5a5a5; }
+    #outputBox {
+        margin-top: 16px;
+        padding: 14px;
+        background: #111;
+        color: #d1fae5;
+        border-radius: 8px;
+        white-space: pre-wrap;
+        min-height: 100px;
+        font-family: monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        overflow-x: auto;
+    }
+</style>
+</head>
+<body>
 
+<h1>Jojo AI Website Builder</h1>
+<div id="status">Checking server status...</div>
+
+<textarea id="question" placeholder="Describe the website you want, e.g. 'Build a landing page for a coffee shop'"></textarea>
+<button id="askButton" onclick="generateSite()">Generate</button>
+
+<div id="outputBox">Generated code will appear here.</div>
+
+<script>
+// Where to find the current tunnel URL (raw GitHub config file)
+const TUNNEL_CONFIG_URL = "https://raw.githubusercontent.com/emalawi/jojo/main/config/tunnel.json";
+
+let serverUrl = null;
+
+async function fetchTunnelUrl() {
+    try {
+        const resp = await fetch(TUNNEL_CONFIG_URL + "?t=" + Date.now()); // cache-bust
+        const data = await resp.json();
+        serverUrl = data.url;
+        return serverUrl;
+    } catch (err) {
+        document.getElementById('status').textContent = 'Could not load server config: ' + err.message;
+        document.getElementById('status').className = 'offline';
+        return null;
+    }
+}
+
+async function pollStatus() {
+    if (!serverUrl) {
+        await fetchTunnelUrl();
+    }
+    if (!serverUrl) return;
+
+    const statusEl = document.getElementById('status');
+    try {
+        const resp = await fetch(serverUrl + '/status');
+        const data = await resp.json();
+        statusEl.textContent = 'Server online — model: ' + data.model;
+        statusEl.className = 'online';
+    } catch (err) {
+        statusEl.textContent = 'Server offline or unreachable';
+        statusEl.className = 'offline';
+    }
+}
+
+async function generateSite() {
+    const question = document.getElementById('question').value.trim();
+    const outputBox = document.getElementById('outputBox');
+    const askButton = document.getElementById('askButton');
+
+    if (!question) {
+        alert('Please describe the website you want first.');
+        return;
+    }
+    if (!serverUrl) {
+        await fetchTunnelUrl();
+        if (!serverUrl) {
+            alert('Could not reach server config. Try again.');
+            return;
+        }
+    }
+
+    askButton.disabled = true;
+    outputBox.textContent = '';
+
+    try {
+        const response = await fetch(serverUrl + '/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: question })
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop(); // keep incomplete chunk for next read
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const jsonStr = line.slice(6);
+                try {
+                    const parsed = JSON.parse(jsonStr);
+                    if (parsed.event === 'token') {
+                        outputBox.textContent += parsed.text;
+                    } else if (parsed.event === 'done') {
+                        askButton.disabled = false;
+                    }
+                } catch (e) {
+                    // ignore malformed chunk
+                }
+            }
+        }
+    } catch (err) {
+        outputBox.textContent = 'Error: ' + err.message;
+    } finally {
+        askButton.disabled = false;
+    }
+}
+
+// Check status on load, then every 15 seconds
+fetchTunnelUrl().then(pollStatus);
+setInterval(pollStatus, 15000);
+</script>
+
+</body>
+</html>
