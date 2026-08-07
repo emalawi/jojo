@@ -1,1 +1,17 @@
-
+{
+  "modules": [
+    {
+      "module": "mathematics",
+      "title": "Introduction to Mathematics",
+      "start_date": "2026-08-01",
+      "end_date": "2026-08-21",
+      "subtopics": [
+        "Basic Arithmetic Operations",
+        "Fractions and Decimals",
+        "Introduction to Algebra",
+        "Basic Geometry",
+        "Introduction to Statistics"
+      ]
+    }
+  ]
+}
