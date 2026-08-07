@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Jojo AI Website Builder</title>
+<title>Jojo Platform</title>
 <style>
     body {
         font-family: -apple-system, Roboto, Arial, sans-serif;
@@ -11,33 +11,52 @@
         margin: 0;
         padding: 16px;
     }
-    h1 { font-size: 20px; color: #222; }
+    h1 { font-size: 20px; color: #222; margin-bottom: 4px; }
     #status { font-size: 13px; margin-bottom: 12px; color: #888; }
     #status.online { color: #16a34a; }
     #status.offline { color: #dc2626; }
-    #question {
+
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab-btn {
+        padding: 10px 16px;
+        border: none;
+        border-radius: 8px;
+        background: #e4e4e7;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    .tab-btn.active { background: #4f46e5; color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    textarea, input[type=text], input[type=date] {
         width: 100%;
         box-sizing: border-box;
         padding: 10px;
         border: 1px solid #ccc;
         border-radius: 8px;
         font-size: 15px;
-        min-height: 70px;
-        resize: vertical;
+        margin-bottom: 8px;
     }
+    textarea { min-height: 70px; resize: vertical; }
+
     button {
-        margin-top: 10px;
-        padding: 12px 20px;
+        padding: 12px 18px;
         background: #4f46e5;
         color: white;
         border: none;
         border-radius: 8px;
-        font-size: 15px;
+        font-size: 14px;
         cursor: pointer;
+        margin-right: 6px;
+        margin-bottom: 6px;
     }
+    button.secondary { background: #6b7280; }
+    button.danger { background: #dc2626; }
     button:disabled { background: #a5a5a5; }
-    #outputBox {
-        margin-top: 16px;
+
+    #outputBox, #bisOutputBox {
+        margin-top: 12px;
         padding: 14px;
         background: #111;
         color: #d1fae5;
@@ -49,27 +68,96 @@
         line-height: 1.5;
         overflow-x: auto;
     }
+
+    .card {
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 14px;
+        margin-bottom: 14px;
+    }
+    .card h3 { margin-top: 0; font-size: 15px; }
+
+    .module-block {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        background: #fafafa;
+    }
+    .subtopic-row { display: flex; gap: 6px; margin-bottom: 4px; }
+    .subtopic-row input { flex: 1; margin-bottom: 0; }
+    small.hint { display: block; color: #888; margin-top: -4px; margin-bottom: 8px; }
 </style>
 </head>
 <body>
 
-<h1>Jojo AI Website Builder</h1>
+<h1>Jojo Platform</h1>
 <div id="status">Checking server status...</div>
 
-<textarea id="question" placeholder="Describe the website you want, e.g. 'Build a landing page for a coffee shop'"></textarea>
-<button id="askButton" onclick="generateSite()">Generate</button>
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('builder')">Website Builder</button>
+    <button class="tab-btn" onclick="switchTab('bis')">BIS Learning</button>
+</div>
 
-<div id="outputBox">Generated code will appear here.</div>
+<!-- ================= WEBSITE BUILDER TAB ================= -->
+<div id="tab-builder" class="tab-content active">
+    <div class="card">
+        <textarea id="question" placeholder="Describe the website you want, e.g. 'Build a landing page for a coffee shop'"></textarea>
+        <button id="askButton" onclick="generateSite()">Generate</button>
+        <div id="outputBox">Generated code will appear here.</div>
+    </div>
+</div>
+
+<!-- ================= BIS LEARNING TAB ================= -->
+<div id="tab-bis" class="tab-content">
+
+    <div class="card">
+        <h3>Today's Module</h3>
+        <div id="currentModuleInfo">Loading...</div>
+        <div id="pdfLink"></div>
+    </div>
+
+    <div class="card">
+        <h3>Study Tools</h3>
+        <button onclick="bisRequest('teach')">Teach Me</button>
+        <button onclick="bisRequest('notes')">AI Notes</button>
+        <button onclick="bisRequest('assignment')">Assignment</button>
+        <button onclick="bisRequest('quiz')">Quiz</button>
+        <div id="bisOutputBox">Select an option above.</div>
+    </div>
+
+    <div class="card">
+        <h3>Timetable Editor</h3>
+        <div id="modulesContainer"></div>
+        <button class="secondary" onclick="addModuleBlock()">+ Add Module</button>
+        <button onclick="saveTimetable()">Save Timetable</button>
+        <div id="timetableStatus" style="font-size:13px; color:#888; margin-top:6px;"></div>
+    </div>
+
+</div>
 
 <script>
-// Where to find the current tunnel URL (raw GitHub config file)
 const TUNNEL_CONFIG_URL = "https://raw.githubusercontent.com/emalawi/jojo/main/config/tunnel.json";
+const GITHUB_PDF_BASE = "https://raw.githubusercontent.com/emalawi/jojo/main/BIS/";
 
 let serverUrl = null;
 
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById('tab-' + tab).classList.add('active');
+    event.target.classList.add('active');
+
+    if (tab === 'bis') {
+        loadCurrentModule();
+        loadTimetable();
+    }
+}
+
 async function fetchTunnelUrl() {
     try {
-        const resp = await fetch(TUNNEL_CONFIG_URL + "?t=" + Date.now()); // cache-bust
+        const resp = await fetch(TUNNEL_CONFIG_URL + "?t=" + Date.now());
         const data = await resp.json();
         serverUrl = data.url;
         return serverUrl;
@@ -81,11 +169,8 @@ async function fetchTunnelUrl() {
 }
 
 async function pollStatus() {
-    if (!serverUrl) {
-        await fetchTunnelUrl();
-    }
+    if (!serverUrl) await fetchTunnelUrl();
     if (!serverUrl) return;
-
     const statusEl = document.getElementById('status');
     try {
         const resp = await fetch(serverUrl + '/status');
@@ -98,33 +183,11 @@ async function pollStatus() {
     }
 }
 
-async function generateSite() {
-    const question = document.getElementById('question').value.trim();
-    const outputBox = document.getElementById('outputBox');
-    const askButton = document.getElementById('askButton');
-
-    if (!question) {
-        alert('Please describe the website you want first.');
-        return;
-    }
-    if (!serverUrl) {
-        await fetchTunnelUrl();
-        if (!serverUrl) {
-            alert('Could not reach server config. Try again.');
-            return;
-        }
-    }
-
-    askButton.disabled = true;
-    outputBox.textContent = '';
-
+// ---------- Streaming helper (shared by builder + BIS) ----------
+async function streamToBox(url, options, outputEl, doneCallback) {
+    outputEl.textContent = '';
     try {
-        const response = await fetch(serverUrl + '/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: question })
-        });
-
+        const response = await fetch(url, options);
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -132,34 +195,178 @@ async function generateSite() {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n\n');
-            buffer = lines.pop(); // keep incomplete chunk for next read
+            buffer = lines.pop();
 
             for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
-                const jsonStr = line.slice(6);
                 try {
-                    const parsed = JSON.parse(jsonStr);
+                    const parsed = JSON.parse(line.slice(6));
                     if (parsed.event === 'token') {
-                        outputBox.textContent += parsed.text;
+                        outputEl.textContent += parsed.text;
                     } else if (parsed.event === 'done') {
-                        askButton.disabled = false;
+                        if (doneCallback) doneCallback();
                     }
-                } catch (e) {
-                    // ignore malformed chunk
-                }
+                } catch (e) {}
             }
         }
     } catch (err) {
-        outputBox.textContent = 'Error: ' + err.message;
-    } finally {
-        askButton.disabled = false;
+        outputEl.textContent = 'Error: ' + err.message;
+        if (doneCallback) doneCallback();
     }
 }
 
-// Check status on load, then every 15 seconds
+// ---------- Website Builder ----------
+async function generateSite() {
+    const question = document.getElementById('question').value.trim();
+    const outputBox = document.getElementById('outputBox');
+    const askButton = document.getElementById('askButton');
+
+    if (!question) { alert('Please describe the website you want first.'); return; }
+    if (!serverUrl) await fetchTunnelUrl();
+    if (!serverUrl) { alert('Could not reach server config.'); return; }
+
+    askButton.disabled = true;
+    await streamToBox(serverUrl + '/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: question })
+    }, outputBox, () => { askButton.disabled = false; });
+}
+
+// ---------- BIS: current module + PDF link ----------
+async function loadCurrentModule() {
+    if (!serverUrl) await fetchTunnelUrl();
+    if (!serverUrl) return;
+    const infoEl = document.getElementById('currentModuleInfo');
+    const pdfEl = document.getElementById('pdfLink');
+
+    try {
+        const resp = await fetch(serverUrl + '/current-module');
+        const data = await resp.json();
+        if (data.error) {
+            infoEl.textContent = data.error;
+            pdfEl.innerHTML = '';
+            return;
+        }
+        infoEl.innerHTML = '<strong>' + data.module + ': ' + data.title + '</strong><br>' +
+            'Subtopics: ' + data.subtopics.join(', ');
+        pdfEl.innerHTML = '<a href="' + GITHUB_PDF_BASE + data.module + '.pdf" target="_blank">View Original PDF</a>';
+        window.currentBisModule = data.module;
+    } catch (err) {
+        infoEl.textContent = 'Error loading module: ' + err.message;
+    }
+}
+
+// ---------- BIS: Teach / Notes / Assignment / Quiz ----------
+async function bisRequest(type) {
+    if (!serverUrl) await fetchTunnelUrl();
+    if (!serverUrl) return;
+    const outputEl = document.getElementById('bisOutputBox');
+    outputEl.textContent = 'Loading...';
+    await streamToBox(serverUrl + '/' + type, { method: 'GET' }, outputEl, null);
+}
+
+// ---------- Timetable editor ----------
+async function loadTimetable() {
+    if (!serverUrl) await fetchTunnelUrl();
+    if (!serverUrl) return;
+    try {
+        const resp = await fetch(serverUrl + '/timetable');
+        const data = await resp.json();
+        renderTimetable(data.modules || []);
+    } catch (err) {
+        document.getElementById('timetableStatus').textContent = 'Error loading timetable: ' + err.message;
+    }
+}
+
+function renderTimetable(modules) {
+    const container = document.getElementById('modulesContainer');
+    container.innerHTML = '';
+    modules.forEach(mod => addModuleBlock(mod));
+}
+
+function addModuleBlock(existing) {
+    const container = document.getElementById('modulesContainer');
+    const block = document.createElement('div');
+    block.className = 'module-block';
+
+    const mod = existing || { module: '', title: '', start_date: '', end_date: '', subtopics: [''] };
+
+    block.innerHTML = `
+        <input type="text" class="mod-name" placeholder="Module name e.g. Module1" value="${mod.module}">
+        <input type="text" class="mod-title" placeholder="Module title" value="${mod.title}">
+        <small class="hint">Start date</small>
+        <input type="date" class="mod-start" value="${mod.start_date}">
+        <small class="hint">End date</small>
+        <input type="date" class="mod-end" value="${mod.end_date}">
+        <div class="subtopics-list"></div>
+        <button type="button" class="secondary" onclick="addSubtopicRow(this)">+ Add Subtopic</button>
+        <button type="button" class="danger" onclick="this.closest('.module-block').remove()">Remove Module</button>
+    `;
+
+    container.appendChild(block);
+
+    const subtopicsList = block.querySelector('.subtopics-list');
+    mod.subtopics.forEach(st => addSubtopicRow(block.querySelector('button.secondary'), st));
+}
+
+function addSubtopicRow(triggerBtn, value) {
+    const block = triggerBtn.closest('.module-block');
+    const list = block.querySelector('.subtopics-list');
+    const row = document.createElement('div');
+    row.className = 'subtopic-row';
+    row.innerHTML = `
+        <input type="text" class="subtopic-input" placeholder="Subtopic" value="${value || ''}">
+        <button type="button" class="danger" onclick="this.parentElement.remove()">X</button>
+    `;
+    list.appendChild(row);
+}
+
+async function saveTimetable() {
+    const blocks = document.querySelectorAll('.module-block');
+    const modules = [];
+
+    blocks.forEach(block => {
+        const subtopics = Array.from(block.querySelectorAll('.subtopic-input'))
+            .map(inp => inp.value.trim())
+            .filter(v => v.length > 0);
+
+        modules.push({
+            module: block.querySelector('.mod-name').value.trim(),
+            title: block.querySelector('.mod-title').value.trim(),
+            start_date: block.querySelector('.mod-start').value,
+            end_date: block.querySelector('.mod-end').value,
+            subtopics: subtopics
+        });
+    });
+
+    const statusEl = document.getElementById('timetableStatus');
+    statusEl.textContent = 'Saving...';
+
+    if (!serverUrl) await fetchTunnelUrl();
+    if (!serverUrl) { statusEl.textContent = 'Server not reachable.'; return; }
+
+    try {
+        const resp = await fetch(serverUrl + '/timetable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modules })
+        });
+        const data = await resp.json();
+        if (data.status === 'success') {
+            statusEl.textContent = 'Saved successfully.';
+            loadCurrentModule();
+        } else {
+            statusEl.textContent = 'Failed: ' + (data.error || 'unknown error');
+        }
+    } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+    }
+}
+
+// ---------- Init ----------
 fetchTunnelUrl().then(pollStatus);
 setInterval(pollStatus, 15000);
 </script>
