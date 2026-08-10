@@ -1,0 +1,47 @@
+{
+  "mathematics": {
+    "main_topics": [
+      {
+        "topic": "Introduction",
+        "subtopics": [
+          "Definition of Set",
+          "History of Set Theory",
+          "Importance of Set Theory"
+        ]
+      },
+      {
+        "topic": "Set Notations",
+        "subtopics": [
+          "Roster Notation",
+          "Set Builder Notation"
+        ]
+      },
+      {
+        "topic": "Elements of a Set",
+        "subtopics": [
+          "Definition",
+          "Notation",
+          "Examples"
+        ]
+      },
+      {
+        "topic": "Cardinality of a Set",
+        "subtopics": [
+          "Definition",
+          "Finite and Infinite Sets",
+          "Singleton Set"
+        ]
+      },
+      {
+        "topic": "Relation Between Sets",
+        "subtopics": [
+          "Equality of Sets",
+          "Subset",
+          "Superset",
+          "Proper Subset",
+          "Disjoint Sets"
+        ]
+      }
+    ]
+  }
+}
