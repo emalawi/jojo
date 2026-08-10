@@ -78,6 +78,20 @@
     }
     .card h3 { margin-top: 0; font-size: 15px; }
 
+    .progress-bar-bg {
+        background: #e4e4e7;
+        border-radius: 6px;
+        height: 10px;
+        overflow: hidden;
+        margin-top: 6px;
+    }
+    .progress-bar-fill {
+        background: #16a34a;
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s;
+    }
+
     .module-block {
         border: 1px solid #ddd;
         border-radius: 8px;
@@ -116,6 +130,14 @@
         <h3>Today's Module</h3>
         <div id="currentModuleInfo">Loading...</div>
         <div id="pdfLink"></div>
+        <button class="secondary" onclick="extractTopics()">Extract Topics (run once per new PDF)</button>
+        <div id="extractStatus" style="font-size:13px; color:#888;"></div>
+    </div>
+
+    <div class="card">
+        <h3>Progress</h3>
+        <div id="progressInfo">Loading...</div>
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressBarFill"></div></div>
     </div>
 
     <div class="card">
@@ -129,6 +151,7 @@
 
     <div class="card">
         <h3>Timetable Editor</h3>
+        <small class="hint">Sets which module is "today's module." Subtopics here are not used for teaching anymore — topics are extracted from the PDF automatically.</small>
         <div id="modulesContainer"></div>
         <button class="secondary" onclick="addModuleBlock()">+ Add Module</button>
         <button onclick="saveTimetable()">Save Timetable</button>
@@ -142,6 +165,7 @@ const TUNNEL_CONFIG_URL = "https://raw.githubusercontent.com/emalawi/jojo/main/c
 const GITHUB_PDF_BASE = "https://raw.githubusercontent.com/emalawi/jojo/main/BIS/";
 
 let serverUrl = null;
+let currentBisModule = null;
 
 function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -188,6 +212,16 @@ async function streamToBox(url, options, outputEl, doneCallback) {
     outputEl.textContent = '';
     try {
         const response = await fetch(url, options);
+
+        // Handle plain JSON error responses (non-streaming) gracefully
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            const data = await response.json();
+            outputEl.textContent = data.error || JSON.stringify(data);
+            if (doneCallback) doneCallback();
+            return;
+        }
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
@@ -250,22 +284,79 @@ async function loadCurrentModule() {
             pdfEl.innerHTML = '';
             return;
         }
-        infoEl.innerHTML = '<strong>' + data.module + ': ' + data.title + '</strong><br>' +
-            'Subtopics: ' + data.subtopics.join(', ');
+        infoEl.innerHTML = '<strong>' + data.module + ': ' + data.title + '</strong>';
         pdfEl.innerHTML = '<a href="' + GITHUB_PDF_BASE + data.module + '.pdf" target="_blank">View Original PDF</a>';
-        window.currentBisModule = data.module;
+        currentBisModule = data.module;
+        loadProgress();
     } catch (err) {
         infoEl.textContent = 'Error loading module: ' + err.message;
     }
 }
 
+// ---------- BIS: extract topics ----------
+async function extractTopics() {
+    if (!currentBisModule) { alert('No current module set.'); return; }
+    if (!serverUrl) await fetchTunnelUrl();
+    const statusEl = document.getElementById('extractStatus');
+    statusEl.textContent = 'Extracting topics from PDF... this may take a moment.';
+
+    try {
+        const resp = await fetch(serverUrl + '/extract-topics?module=' + encodeURIComponent(currentBisModule));
+        const data = await resp.json();
+        if (data.error) {
+            statusEl.textContent = 'Error: ' + data.error;
+        } else {
+            statusEl.textContent = 'Topics extracted successfully.';
+            loadProgress();
+        }
+    } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+    }
+}
+
+// ---------- BIS: progress ----------
+async function loadProgress() {
+    if (!currentBisModule) return;
+    const infoEl = document.getElementById('progressInfo');
+    const barEl = document.getElementById('progressBarFill');
+
+    try {
+        const resp = await fetch(serverUrl + '/module-progress?module=' + encodeURIComponent(currentBisModule));
+        const data = await resp.json();
+        if (data.error) {
+            infoEl.textContent = data.error;
+            barEl.style.width = '0%';
+            return;
+        }
+        if (data.finished) {
+            infoEl.textContent = 'All subtopics completed for this module!';
+            barEl.style.width = '100%';
+        } else {
+            const nextNames = data.next_batch.map(s => s.subtopic).join(', ');
+            infoEl.textContent = data.completed + ' of ' + data.total_subtopics +
+                ' subtopics completed. Next up: ' + nextNames;
+            const pct = Math.round((data.completed / data.total_subtopics) * 100);
+            barEl.style.width = pct + '%';
+        }
+    } catch (err) {
+        infoEl.textContent = 'Error loading progress: ' + err.message;
+    }
+}
+
 // ---------- BIS: Teach / Notes / Assignment / Quiz ----------
 async function bisRequest(type) {
+    if (!currentBisModule) { alert('No current module set. Check the timetable.'); return; }
     if (!serverUrl) await fetchTunnelUrl();
     if (!serverUrl) return;
     const outputEl = document.getElementById('bisOutputBox');
     outputEl.textContent = 'Loading...';
-    await streamToBox(serverUrl + '/' + type, { method: 'GET' }, outputEl, null);
+
+    const url = serverUrl + '/' + type + '?module=' + encodeURIComponent(currentBisModule);
+    await streamToBox(url, { method: 'GET' }, outputEl, () => {
+        if (type === 'teach' || type === 'notes') {
+            loadProgress(); // refresh progress bar after these two, since they advance it
+        }
+    });
 }
 
 // ---------- Timetable editor ----------
@@ -292,36 +383,19 @@ function addModuleBlock(existing) {
     const block = document.createElement('div');
     block.className = 'module-block';
 
-    const mod = existing || { module: '', title: '', start_date: '', end_date: '', subtopics: [''] };
+    const mod = existing || { module: '', title: '', start_date: '', end_date: '', subtopics: [] };
 
     block.innerHTML = `
-        <input type="text" class="mod-name" placeholder="Module name e.g. Module1" value="${mod.module}">
+        <input type="text" class="mod-name" placeholder="Module name e.g. mathematics (must match PDF filename)" value="${mod.module}">
         <input type="text" class="mod-title" placeholder="Module title" value="${mod.title}">
         <small class="hint">Start date</small>
         <input type="date" class="mod-start" value="${mod.start_date}">
         <small class="hint">End date</small>
         <input type="date" class="mod-end" value="${mod.end_date}">
-        <div class="subtopics-list"></div>
-        <button type="button" class="secondary" onclick="addSubtopicRow(this)">+ Add Subtopic</button>
         <button type="button" class="danger" onclick="this.closest('.module-block').remove()">Remove Module</button>
     `;
 
     container.appendChild(block);
-
-    const subtopicsList = block.querySelector('.subtopics-list');
-    mod.subtopics.forEach(st => addSubtopicRow(block.querySelector('button.secondary'), st));
-}
-
-function addSubtopicRow(triggerBtn, value) {
-    const block = triggerBtn.closest('.module-block');
-    const list = block.querySelector('.subtopics-list');
-    const row = document.createElement('div');
-    row.className = 'subtopic-row';
-    row.innerHTML = `
-        <input type="text" class="subtopic-input" placeholder="Subtopic" value="${value || ''}">
-        <button type="button" class="danger" onclick="this.parentElement.remove()">X</button>
-    `;
-    list.appendChild(row);
 }
 
 async function saveTimetable() {
@@ -329,16 +403,12 @@ async function saveTimetable() {
     const modules = [];
 
     blocks.forEach(block => {
-        const subtopics = Array.from(block.querySelectorAll('.subtopic-input'))
-            .map(inp => inp.value.trim())
-            .filter(v => v.length > 0);
-
         modules.push({
             module: block.querySelector('.mod-name').value.trim(),
             title: block.querySelector('.mod-title').value.trim(),
             start_date: block.querySelector('.mod-start').value,
             end_date: block.querySelector('.mod-end').value,
-            subtopics: subtopics
+            subtopics: []
         });
     });
 
